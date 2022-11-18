@@ -1,0 +1,60 @@
++------------------------------------------------------+ 256k
+|               ^ r_ptr    <     ^ w_ptr
+
++------------------------------------------------------+ 256k
+|               ^ r_ptr    >      
+|	^ w_ptr
+
+overrun situations:
+
++------------------------------------------------------+ 256k
+|               ^ r_ptr    <    
+|				^ w_ptr
+
+
+
++------------------------------------------------------+ 256k
+|               ^ r_ptr    >    
+|				
+|	^ w_ptr
+
+r_ptr can never be > w_ptr; it depends on w_ptr, gets increased 
+once blocks computed from w_ptr<->r_ptr relationship had been computed
+but just in case, the first if() statement:
+
+
+	blocksize = (w_ptr - r_ptr) + ((w_cycles - r_cycles) << 18); 
+	/* DEFAULT_RINGBUFFER_SIZE * (w_cycles - r_cycles) 	*/
+
+	if (blocksize > 0) /* should require only cmp and jle	*/
+	/* if (r_ptr < w_ptr || r_cycles < w_cycles) 		*/
+	{
+		if(blocksize > DEFAULT_RINGBUFFER_SIZE) overrun++;
+
+		blocksize > ringbuffer_end - r_ptr ? ringbuffer_end - r_ptr : blocksize;
+		/* otherwise it doesn't get aligned to ringbuffer size */
+
+		blocksize &= 0xFFFF0000; 
+		/* if blocksize is bigger than 64k 	*/		
+		/* make blocksize power of 2 		*/
+		/* the important thing to note here is	*/
+		/* that we always move in n*64k jumps	*/
+
+		if (blocksize != 0) 
+		{
+			/* should require only cmp and jnz instructions */
+			write(file_handler, ringbuffer, blocksize);
+
+			r_ptr += blocksize;
+		}
+	}
+
+We would eventually write multiples of 64k blocks in one pass in case 
+the lag between disk thread and JACK process() is bigger than n*64k
+
+NOTE: Implementation mechanism to write the tail of the buffer, i.e.
+the remaining samples read out from audio card that exceed 
+the last written 64k block. 
+
+
+

@@ -1,0 +1,58 @@
+		if (record_buffer->read_cycles == write_info->cycles)
+		/* Determine whether we are in the same cycle */
+		{
+			if(record_buffer->read_ptr < write_info->ptr)
+			/* Determine whether write pointer is ahead within a single cycle */
+			{
+				if((ptrdiff_t)(write_info->ptr - record_buffer->read_ptr) >= 65536)
+				/* Determine whether we've got 64k audio delivered by JACK process() 	*/
+				{
+					/* 64k gives us decent Mb/s disk write rates			*/
+					write(file, record_buffer->read_ptr, num_frames << 10);  
+					/* << 10 means sizeof(jack_default_audio_sample_t)  * 256	*/
+					/* move the read pointer to next 64k segment 			*/
+					/* record_buffer->read_ptr += (ptrdiff_t)(num_frames) << 8; 	*/
+					__ATOMIC_ADDQ_PTR_64 (&record_buffer->read_ptr, (ptrdiff_t)(num_frames) << 10);
+					
+#ifdef __DEBUG_RECORD_
+					printf("64k data written, read_ptr in segment no. %d \tdelta %ld\n", 
+						(record_buffer->read_ptr - record_buffer->ringbuffer_start) >> 16, 
+						write_info->ptr - record_buffer->read_ptr); 
+#endif
+						
+				}; 	/* else wait for JACK process() to provide more data		*/
+			};		/* else wait for JACK process() to provide more data		*/
+		}	else
+		{		
+			if(record_buffer->read_cycles < write_info->cycles) 
+			/* write pointer already entered another cycle */
+			{
+				if ((record_buffer->read_cycles + 1) == write_info->cycles)
+				/* Is write pointer already ahead by more than 1 cycles? Should never happen but anyway... */
+				{
+					if (((record_buffer->ringbuffer_end - record_buffer->read_ptr) + (write_info->ptr - record_buffer->ringbuffer_start)) < DEFAULT_RINGBUFFER_SIZE) 
+					/* check whether we're not overwriting ringbuffer audio data that's not been written to disk yet */
+					{
+					 	/* we most likely have 64k of audio data available for writing so do it */
+						write(file, record_buffer->read_ptr, num_frames << 10);  
+						/* << 10 means sizeof(jack_default_audio_sample_t) * 256	*/
+						/* move the read pointer to next 64k segment 			*/
+						/* record_buffer->read_ptr += (ptrdiff_t)(num_frames) << 8; 	*/
+						__ATOMIC_ADDQ_PTR_64 (&record_buffer->read_ptr, (ptrdiff_t)(num_frames) << 10);
+						
+#ifdef __DEBUG_RECORD_
+						printf("delta %ld read_ptr %p write_ptr %p read_cycles %ld write_cycles %ld\n",
+						       		((	record_buffer->ringbuffer_end - record_buffer->read_ptr) + 
+								 (	write_info->ptr - record_buffer->ringbuffer_start)), 
+						       			record_buffer->read_ptr, 
+									write_info->ptr, 
+									record_buffer->read_cycles, 
+									write_info->cycles);
+#endif
+						
+					}
+					else printf("overrun\n"); //return 0; 	/* overrun handling here */
+				}
+				else printf("overrun\n");  //return 0; 	/* overrun handling here */
+			};  /*	else wait for JACK process() to provide more data	*/
+		};
